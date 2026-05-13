@@ -88,6 +88,8 @@ const blockTypes: Array<{ type: FlowBlock['type']; label: string }> = [
 ];
 
 const ASSISTANT_MESSAGE_SEPARATOR = '@@NOVA_MENSAGEM@@';
+const sheetsWebhookUrl =
+  'https://script.google.com/macros/s/AKfycbx_cQCZ1v9bG5OAMa5H_i2QB30ceJ0xEQ0aC57CFpeq7_92j1DZefVhQl-fMVqw7Afw/exec';
 
 const deliveryMenuMessage = `Ótimo! 🍕 Você pode escolher uma categoria:
 
@@ -304,7 +306,7 @@ const templates: Template[] = [
     description: 'Comece do zero com perguntas para montar IA e fluxo.',
     defaults: {
       templateId: 'personalizado',
-      agentName: 'Alex',
+      agentName: 'Clara',
       schedule: '',
       services: '',
       prices: '',
@@ -312,7 +314,7 @@ const templates: Template[] = [
       tone: 'natural, claro e consultivo',
       customInstructions: 'Use as informações preenchidas para criar uma conversa sob medida.',
     },
-    opening: 'Oi, sou o Alex. Me conta o que você precisa e eu te ajudo com o próximo passo.',
+    opening: 'Olá, aqui é Clara da MBA. Posso te ajudar a entender o melhor atendimento e encontrar uma solução rápida pelo WhatsApp.',
     flow: [
       createFlowBlock('saudacao', 'Apresentação', 'Olá! Sou o assistente virtual. Como posso te ajudar hoje?', [
         createFlowOption('Ver preços'),
@@ -336,6 +338,92 @@ const emptyLead: LeadForm = {
   goal: '',
 };
 
+const defaultTemplate = templates.find((template) => template.id === 'personalizado') || templates[0];
+
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function removeBrazilCode(value: string) {
+  let digits = onlyDigits(value);
+
+  if (digits.startsWith('55') && digits.length > 11) {
+    digits = digits.slice(2);
+  }
+
+  return digits.slice(0, 11);
+}
+
+function formatBrazilPhone(value: string) {
+  const digits = removeBrazilCode(value);
+
+  if (digits.length <= 2) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  }
+
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+}
+
+function isValidBrazilPhone(value: string) {
+  const digits = removeBrazilCode(value);
+  return digits.length === 10 || digits.length === 11;
+}
+
+function createLeadId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `lead-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getExperienceLabel(experienceType: 'ia' | 'fluxo') {
+  return experienceType === 'fluxo' ? 'Fluxo de mensagens' : 'Agente IA';
+}
+
+function buildSheetsLeadPayload(
+  lead: LeadForm,
+  agent: AgentSettings,
+  selectedTemplate: Template,
+  experienceType: 'ia' | 'fluxo',
+) {
+  const cleanPhone = removeBrazilCode(lead.phone);
+
+  return {
+    leadId: createLeadId(),
+    name: lead.name,
+    phone: cleanPhone,
+    company: lead.businessName,
+    segment: lead.segment,
+    experienceType: getExperienceLabel(experienceType),
+    template: selectedTemplate.label,
+    automationGoal: lead.goal,
+    agentName: agent.agentName,
+    businessHours: agent.schedule,
+    services: agent.services,
+    prices: agent.prices,
+    tone: agent.tone,
+    extraInfo: [agent.rules, agent.customInstructions].filter(Boolean).join('\n\n'),
+    status: 'Novo Lead',
+  };
+}
+
+async function sendLeadToSheets(payload: ReturnType<typeof buildSheetsLeadPayload>) {
+  await fetch(sheetsWebhookUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    body: JSON.stringify(payload),
+  });
+}
+
 function buildTemplateOpening(template: Template, agent: AgentSettings, lead: LeadForm) {
   const agentName = agent.agentName.trim() || template.defaults.agentName;
   const businessName = agent.businessName.trim() || lead.businessName.trim();
@@ -353,7 +441,7 @@ function buildTemplateOpening(template: Template, agent: AgentSettings, lead: Le
     case 'delivery':
       return `Oi, aqui é ${agentName}${companySuffix}. Posso te ajudar a fazer um pedido agora.`;
     default:
-      return `Oi, aqui é ${agentName}${companySuffix}. Me conta o que você precisa e eu te ajudo com o próximo passo.`;
+      return `Olá, aqui é ${agentName}${companySuffix}. Posso te ajudar a entender o melhor atendimento e encontrar uma solução rápida pelo WhatsApp.`;
   }
 }
 
@@ -364,21 +452,43 @@ function splitAssistantReply(reply: string) {
     .filter(Boolean);
 }
 
+function buildLocalAssistantReply(input: string) {
+  const normalizedInput = input
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (['preco', 'precos', 'valor', 'valores', 'orcamento'].some((term) => normalizedInput.includes(term))) {
+    return 'Claro. Consigo te orientar pelos valores e entender qual serviço faz mais sentido para você. Qual opção você quer consultar primeiro?';
+  }
+
+  if (['horario', 'agenda', 'agendar', 'marcar', 'disponibilidade'].some((term) => normalizedInput.includes(term))) {
+    return 'Perfeito. Posso te ajudar com agenda e disponibilidade. Qual dia ou período seria melhor para você?';
+  }
+
+  if (['servico', 'servicos', 'opcoes', 'cardapio', 'catalogo'].some((term) => normalizedInput.includes(term))) {
+    return 'Posso te mostrar as principais opções e te guiar para o próximo passo. O que você procura resolver agora?';
+  }
+
+  return 'Consigo continuar a simulação com uma resposta local enquanto a conexão com a OpenRouter é ajustada. Me diga se você quer consultar serviços, valores ou horários.';
+}
+
 export default function AgentSimulatorSection() {
   const [lead, setLead] = useState<LeadForm>(emptyLead);
   const [leadCaptured, setLeadCaptured] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0].id);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(defaultTemplate.id);
   const [builderMode, setBuilderMode] = useState<'ia' | 'fluxo'>('ia');
   const [agent, setAgent] = useState<AgentSettings>({
-    ...templates[0].defaults,
+    ...defaultTemplate.defaults,
     businessName: '',
   });
-  const [flowBlocks, setFlowBlocks] = useState<FlowBlock[]>(templates[0].flow);
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: templates[0].opening }]);
+  const [flowBlocks, setFlowBlocks] = useState<FlowBlock[]>(defaultTemplate.flow);
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: defaultTemplate.opening }]);
   const [input, setInput] = useState('');
   const [isRegisteringLead, setIsRegisteringLead] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [activeFlowIndex, setActiveFlowIndex] = useState(0);
   const [flowSelections, setFlowSelections] = useState<string[]>([]);
   const [isFlowCanvasOpen, setIsFlowCanvasOpen] = useState(false);
@@ -386,7 +496,7 @@ export default function AgentSimulatorSection() {
 
   const canEditFlow = selectedTemplateId === 'personalizado';
   const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) || templates[0],
+    () => templates.find((template) => template.id === selectedTemplateId) || defaultTemplate,
     [selectedTemplateId],
   );
   const openingMessage = useMemo(
@@ -411,7 +521,11 @@ export default function AgentSimulatorSection() {
   }, [openingMessage]);
 
   const updateLead = useCallback((field: keyof LeadForm, value: string) => {
-    setLead((current) => ({ ...current, [field]: value }));
+    setLead((current) => ({ ...current, [field]: field === 'phone' ? removeBrazilCode(value) : value }));
+
+    if (field === 'phone') {
+      setPhoneError('');
+    }
   }, []);
 
   const updateAgent = useCallback((field: keyof AgentSettings, value: string) => {
@@ -508,8 +622,16 @@ export default function AgentSimulatorSection() {
 
   async function handleLeadSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsRegisteringLead(true);
     setStatus('');
+
+    if (!isValidBrazilPhone(lead.phone)) {
+      setPhoneError('Digite um WhatsApp válido com DDD.');
+      return;
+    }
+
+    setIsRegisteringLead(true);
+
+    const sheetsPayload = buildSheetsLeadPayload(lead, agent, selectedTemplate, builderMode);
 
     try {
       await fetch('/api/agent-leads', {
@@ -517,8 +639,16 @@ export default function AgentSimulatorSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lead),
       });
-    } catch {
+    } catch (error) {
+      console.error('[local-lead-submit-error]', error);
       setStatus('Lead salvo localmente. A API será conectada quando o servidor estiver pronto.');
+    }
+
+    try {
+      await sendLeadToSheets(sheetsPayload);
+    } catch (error) {
+      console.error('[sheets-lead-submit-error]', error);
+      setStatus('Não foi possível enviar o lead para a planilha agora. Tente novamente em instantes.');
     } finally {
       setAgent((current) => ({ ...current, businessName: current.businessName || lead.businessName }));
       setLeadCaptured(true);
@@ -557,7 +687,18 @@ export default function AgentSimulatorSection() {
         }),
       });
 
-      if (!response.ok) throw new Error('Simulation request failed');
+      if (!response.ok) {
+        let errorMessage = 'Não foi possível conectar com a OpenRouter agora.';
+
+        try {
+          const errorData = (await response.json()) as { error?: string; details?: string };
+          errorMessage = errorData.details || errorData.error || errorMessage;
+        } catch {
+          // Keep the friendly message when the server returns a non-JSON error.
+        }
+
+        throw new Error(errorMessage);
+      }
 
       const data = (await response.json()) as { reply: string; mode: string };
       const assistantReplies = splitAssistantReply(data.reply).map((content) => ({ role: 'assistant' as const, content }));
@@ -566,12 +707,14 @@ export default function AgentSimulatorSection() {
       if (data.mode === 'fallback') {
         setStatus('Modo demo ativo. Configure OPENROUTER_API_KEY para respostas com IA.');
       }
-    } catch {
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Não foi possível conectar com a OpenRouter agora.';
+      setStatus(errorMessage.includes('OpenRouter') ? errorMessage : `OpenRouter: ${errorMessage}`);
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          content: 'Tive uma instabilidade ao responder. Me chama de novo com a dúvida principal que eu continuo a simulação.',
+          content: buildLocalAssistantReply(trimmedInput),
         },
       ]);
     } finally {
@@ -582,7 +725,7 @@ export default function AgentSimulatorSection() {
   return (
     <section
       id="simulador-agente"
-      className="section-shell scroll-mt-6 bg-[#030712] text-white"
+      className="simulator-section section-shell scroll-mt-6 bg-[#030712] text-white"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(18,184,238,0.16),transparent_30rem),radial-gradient(circle_at_78%_28%,rgba(11,47,120,0.34),transparent_34rem),linear-gradient(135deg,#030712_0%,#061224_45%,#02040a_100%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(125,211,252,0.08)_1px,transparent_1px),linear-gradient(rgba(125,211,252,0.06)_1px,transparent_1px)] bg-[size:72px_72px] opacity-40 [mask-image:radial-gradient(circle_at_center,black,transparent_78%)]" />
@@ -600,112 +743,131 @@ export default function AgentSimulatorSection() {
             <Sparkles className="h-4 w-4" />
             Simulador interativo
           </div>
-          <h2 className="text-balance text-4xl font-semibold leading-tight text-white md:text-6xl">Teste gratuitamente seu agente de IA</h2>
+          <h2 className="text-balance text-4xl font-semibold leading-tight text-white md:text-6xl">Teste gratuitamente sua automação no WhatsApp</h2>
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-            Faça um cadastro rápido para liberar a prévia gratuita. Depois escolha um modelo, ajuste os dados do negócio e veja como o atendimento ficaria no WhatsApp.
+            Faça um cadastro rápido, escolha entre Agente IA ou Fluxo de mensagens e veja como seu atendimento ficaria no WhatsApp.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:gap-8">
+        <div className="simulator-wrapper grid grid-cols-1 gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:gap-8">
           <motion.div
-            className="rounded-2xl border border-white/10 bg-white/[0.94] p-5 text-slate-950 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:p-6"
+            className="simulator-card rounded-2xl border border-white/10 bg-white/[0.94] p-4 text-slate-950 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:p-5"
             initial={{ opacity: 0, y: 18 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.45 }}
           >
             {!leadCaptured ? (
-              <LeadCaptureForm lead={lead} isRegisteringLead={isRegisteringLead} onUpdateLead={updateLead} onSubmit={handleLeadSubmit} />
+              <LeadCaptureForm lead={lead} phoneError={phoneError} isRegisteringLead={isRegisteringLead} onUpdateLead={updateLead} onSubmit={handleLeadSubmit} />
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <h3 className="text-2xl font-bold text-slate-950">
-                      {builderMode === 'fluxo' ? 'Template de fluxo' : 'Template da automação'}
-                    </h3>
-                    <p className="text-sm text-slate-500">Lead capturado: {lead.name}</p>
+                    <h3 className="text-2xl font-bold text-slate-950">Escolha como quer testar</h3>
+                    <p className="text-sm text-slate-500">
+                      Cadastro liberado. Escolha uma experiência, selecione um modelo e personalize os dados.
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBuilderMode('ia');
-                          setIsFlowCanvasOpen(false);
-                        }}
-                        className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold transition ${
-                          builderMode === 'ia' ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
-                        }`}
-                      >
-                        <Wand2 className="h-4 w-4" />
-                        Agente IA
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBuilderMode('fluxo');
-                          setIsFlowCanvasOpen(false);
-                        }}
-                        className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold transition ${
-                          builderMode === 'fluxo' ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
-                        }`}
-                      >
-                        <GitBranch className="h-4 w-4" />
-                        Fluxo
-                      </button>
-                    </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300/15 bg-emerald-300/10 text-emerald-300">
-                      <Check className="h-5 w-5" />
-                    </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600">
+                    <Check className="h-5 w-5" />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {templates.map((template) => (
-                    <button
-                      key={template.id}
-                      type="button"
-                      onClick={() => selectTemplate(template)}
-                      className={`rounded-lg border p-4 text-left transition ${
-                        selectedTemplateId === template.id
-                          ? 'border-sky-300 bg-sky-50 text-slate-950 shadow-sm'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50/60'
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center gap-3">
-                        <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-100 bg-sky-50 text-sm font-bold text-sky-600">
-                          {template.icon}
+                <div className="experience-choice choice-toggle">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuilderMode('ia');
+                      setIsFlowCanvasOpen(false);
+                    }}
+                    className={`choice-card ${builderMode === 'ia' ? 'active' : ''}`}
+                  >
+                    <span className="choice-card-icon">
+                      <Wand2 className="h-5 w-5" />
+                    </span>
+                    <span>
+                      <span className="block font-semibold">Agente IA</span>
+                      <span className="mt-1 block text-sm">Atendimento inteligente com respostas personalizadas.</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuilderMode('fluxo');
+                      setIsFlowCanvasOpen(false);
+                    }}
+                    className={`choice-card ${builderMode === 'fluxo' ? 'active' : ''}`}
+                  >
+                    <span className="choice-card-icon">
+                      <GitBranch className="h-5 w-5" />
+                    </span>
+                    <span>
+                      <span className="block font-semibold">Fluxo de mensagens</span>
+                      <span className="mt-1 block text-sm">Sequência guiada de mensagens para atendimento simples.</span>
+                    </span>
+                  </button>
+                </div>
+
+                <div className="template-section">
+                  <div className="mb-3">
+                    <h4 className="text-sm font-bold uppercase tracking-[0.16em] text-slate-600">
+                      Escolha um modelo de estabelecimento
+                    </h4>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {builderMode === 'fluxo'
+                        ? 'Template de fluxo de mensagens para começar mais rápido.'
+                        : 'Template de agente IA para começar mais rápido.'}
+                    </p>
+                  </div>
+                  <div className="template-grid">
+                    {templates.map((template) => (
+                      <button
+                        key={template.id}
+                        type="button"
+                        onClick={() => selectTemplate(template)}
+                        className={`template-card ${selectedTemplateId === template.id ? 'active' : ''}`}
+                      >
+                        <span className="template-icon">{template.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold">{template.label}</span>
+                          <span className="mt-1 block text-xs leading-5">{template.description}</span>
                         </span>
-                        <span className="font-semibold">{template.label}</span>
-                      </div>
-                      <p className="text-sm text-slate-500">{template.description}</p>
-                    </button>
-                  ))}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {builderMode === 'ia' ? (
-                  <AgentForm agent={agent} onUpdateAgent={updateAgent} />
+                  <div className="config-form">
+                    <AgentForm agent={agent} onUpdateAgent={updateAgent} />
+                  </div>
                 ) : (
-                  <FlowSetupPanel
-                    agent={agent}
-                    canEditFlow={canEditFlow}
-                    isFlowCanvasOpen={isFlowCanvasOpen}
-                    onUpdateAgent={updateAgent}
-                    onOpenFlow={() => setIsFlowCanvasOpen((current) => !current)}
-                  />
+                  <div className="config-form">
+                    <FlowSetupPanel
+                      agent={agent}
+                      canEditFlow={canEditFlow}
+                      isFlowCanvasOpen={isFlowCanvasOpen}
+                      onUpdateAgent={updateAgent}
+                      onOpenFlow={() => setIsFlowCanvasOpen((current) => !current)}
+                    />
+                  </div>
                 )}
               </div>
             )}
           </motion.div>
 
           <motion.div
-            className="rounded-2xl border border-white/10 bg-white/[0.94] p-5 text-slate-950 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:p-6"
+            className="preview-card rounded-2xl border border-white/10 bg-white/[0.94] p-4 text-slate-950 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:p-5"
             initial={{ opacity: 0, y: 18 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.45 }}
           >
-            <div className={`${leadCaptured ? '' : 'pointer-events-none opacity-45'}`}>
+            <div className="mb-5">
+              <h3 className="text-2xl font-bold text-slate-950">Prévia do atendimento</h3>
+              <p className="mt-1 text-sm text-slate-500">Veja como o cliente visualizará a conversa.</p>
+            </div>
+            <div className={`${leadCaptured ? '' : 'pointer-events-none opacity-70'}`}>
               <WhatsAppPreview
                 mode={builderMode}
                 agentName={agent.agentName}
@@ -765,39 +927,59 @@ export default function AgentSimulatorSection() {
 
 function LeadCaptureForm({
   lead,
+  phoneError,
   isRegisteringLead,
   onUpdateLead,
   onSubmit,
 }: {
   lead: LeadForm;
+  phoneError: string;
   isRegisteringLead: boolean;
   onUpdateLead: (field: keyof LeadForm, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-        <div className="mb-2 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-200 text-slate-950">
+      <div className="form-header">
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
             <UserRound className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-2xl font-bold text-slate-950">Cadastro gratuito</h3>
-            <p className="text-sm text-slate-500">Libere a prévia do agente em menos de um minuto.</p>
+            <h3 className="text-2xl font-bold text-slate-950">Crie sua prévia gratuita</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Preencha os dados abaixo e veja como seu atendimento ficaria no WhatsApp.
+            </p>
           </div>
+        </div>
+        <div className="benefit-pills">
+          {['Sem cartão', 'Teste rápido', 'WhatsApp', 'Personalizado'].map((benefit) => (
+            <span key={benefit} className="benefit-pill">
+              <Check className="h-3.5 w-3.5" />
+              {benefit}
+            </span>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <LeadInput label="Seu nome" value={lead.name} onChange={(value) => onUpdateLead('name', value)} required />
-        <LeadInput label="WhatsApp" value={lead.phone} onChange={(value) => onUpdateLead('phone', value)} required />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <LeadInput label="Empresa" value={lead.businessName} onChange={(value) => onUpdateLead('businessName', value)} required />
+      <div className="form-grid">
+        <LeadInput label="Nome" value={lead.name} onChange={(value) => onUpdateLead('name', value)} required />
+        <LeadInput
+          label="WhatsApp"
+          value={formatBrazilPhone(lead.phone)}
+          onChange={(value) => onUpdateLead('phone', value)}
+          type="tel"
+          inputMode="numeric"
+          autoComplete="tel"
+          placeholder="(11) 99999-9999"
+          error={phoneError}
+          required
+        />
+        <LeadInput label="Nome da empresa" value={lead.businessName} onChange={(value) => onUpdateLead('businessName', value)} required />
         <LeadInput label="Segmento" value={lead.segment} onChange={(value) => onUpdateLead('segment', value)} required />
       </div>
-      <label className="block">
-        <span className="mb-2 block text-sm font-medium text-slate-700">O que você quer automatizar?</span>
+      <label className="input-group">
+        <span>O que você quer automatizar?</span>
         <textarea
           value={lead.goal}
           onChange={(event) => onUpdateLead('goal', event.target.value)}
@@ -807,10 +989,11 @@ function LeadCaptureForm({
         />
       </label>
 
-      <button type="submit" disabled={isRegisteringLead} className="btn-neon-solid flex w-full items-center justify-center gap-2 rounded-lg font-semibold disabled:opacity-60">
-        {isRegisteringLead ? 'Liberando...' : 'Testar gratuitamente'}
+      <button type="submit" disabled={isRegisteringLead} className="primary-button btn-neon-solid flex w-full items-center justify-center gap-2 rounded-lg font-semibold disabled:opacity-60">
+        {isRegisteringLead ? 'Liberando...' : 'Gerar meu teste gratuito'}
         <ArrowRight className="h-5 w-5" />
       </button>
+      <p className="text-center text-xs font-medium text-slate-500">A prévia será liberada após o cadastro. Não precisa de cartão.</p>
     </form>
   );
 }
@@ -823,22 +1006,22 @@ function AgentForm({
   onUpdateAgent: (field: keyof AgentSettings, value: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4">
+    <div className="form-grid">
       <LeadInput label="Nome da empresa" value={agent.businessName} onChange={(value) => onUpdateAgent('businessName', value)} />
       <LeadInput label="Nome do atendente/agente" value={agent.agentName} onChange={(value) => onUpdateAgent('agentName', value)} />
       <LeadInput label="Horário de atendimento" value={agent.schedule} onChange={(value) => onUpdateAgent('schedule', value)} />
       <LeadInput label="Serviços prestados" value={agent.services} onChange={(value) => onUpdateAgent('services', value)} />
       <LeadInput label="Média de valores ou Valor dos serviços" value={agent.prices} onChange={(value) => onUpdateAgent('prices', value)} />
       <LeadInput label="Tom de voz do atendente" value={agent.tone} onChange={(value) => onUpdateAgent('tone', value)} />
-      <label className="block">
-        <span className="mb-2 block text-sm font-medium text-slate-700">Outras informações necessárias para montar o atendimento</span>
+      <label className="input-group sm:col-span-2">
+        <span>Outras informações necessárias para montar o atendimento</span>
         <textarea
           value={`${agent.rules}\n${agent.customInstructions}`}
           onChange={(event) => {
             onUpdateAgent('rules', event.target.value);
             onUpdateAgent('customInstructions', '');
           }}
-          className="light-input min-h-32 w-full py-3"
+          className="light-input min-h-28 w-full resize-y py-3"
           placeholder="Ex: qualificar o lead, oferecer avaliação, coletar horário, enviar para humano..."
         />
       </label>
@@ -871,7 +1054,7 @@ function FlowSetupPanel({
             <p className="mt-1 text-sm leading-relaxed text-slate-600">
               {canEditFlow
                 ? 'Personalize os dados e abra o canvas para editar blocos, mensagens e caminhos livremente.'
-                : 'Escolha um template pronto, ajuste os dados do negócio e abra o canvas para visualizar o caminho do atendimento.'}
+                : 'Ajuste os dados do negócio e abra o canvas para visualizar o caminho do atendimento.'}
             </p>
           </div>
         </div>
@@ -891,7 +1074,7 @@ function FlowSetupPanel({
       <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600">
         {canEditFlow
           ? 'No modelo Personalizado, dê dois cliques em um bloco no canvas para editar conteúdo, botões e respostas.'
-          : 'Templates prontos ficam bloqueados para edição livre. Use Personalizado quando quiser montar uma árvore do zero.'}
+          : 'Use o modo personalizado quando quiser montar uma árvore do zero.'}
       </p>
     </div>
   );
@@ -962,7 +1145,7 @@ function FlowBuilder({
             Editor visual do fluxo
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            {canEdit ? 'Dê dois cliques no bloco para editar.' : 'Templates prontos ficam bloqueados para edição. Use Personalizado para alterar blocos.'}
+            {canEdit ? 'Dê dois cliques no bloco para editar.' : 'Abra o modo personalizado para alterar blocos e respostas.'}
           </p>
         </div>
 
@@ -1383,7 +1566,9 @@ function WhatsAppPreview({
   onSendMessage: () => Promise<void>;
   onFlowOptionClick: (blockIndex: number, option: FlowOption) => void;
 }) {
-  const initials = (agentName || businessName || 'AI').slice(0, 2).toUpperCase();
+  const displayAgentName = agentName.trim() || 'Clara';
+  const displayBusinessName = businessName.trim() || 'sua empresa';
+  const initials = (displayAgentName || displayBusinessName).slice(0, 2).toUpperCase();
   const isFlowMode = mode === 'fluxo';
   const chatBackgroundStyle = backgroundSrc
     ? {
@@ -1394,7 +1579,7 @@ function WhatsAppPreview({
     : undefined;
 
   return (
-    <div className="mx-auto max-w-[440px] rounded-[2rem] border border-slate-700/80 bg-slate-950 p-3 shadow-[0_30px_90px_rgba(0,0,0,0.5)]">
+    <div className="phone-preview mx-auto max-w-[440px] rounded-[2rem] border border-slate-700/80 bg-slate-950 p-3 shadow-[0_30px_90px_rgba(0,0,0,0.5)]">
       <div className="mx-auto mb-3 h-1.5 w-20 rounded-full bg-slate-700" />
       <div className="flex h-[680px] min-h-0 flex-col overflow-hidden rounded-[1.45rem] border border-black/40 bg-[#0b141a]">
         <div className="flex items-center justify-between gap-3 border-b border-black/30 bg-[#202c33] px-4 py-3">
@@ -1404,7 +1589,7 @@ function WhatsAppPreview({
               {avatarSrc && (
                 <img
                   src={avatarSrc}
-                  alt={`Foto de perfil de ${agentName || businessName || 'Agente IA'}`}
+                  alt={`Foto de perfil de ${displayAgentName || displayBusinessName}`}
                   className="absolute inset-0 h-full w-full object-cover"
                   loading="lazy"
                   onError={(event) => {
@@ -1414,9 +1599,9 @@ function WhatsAppPreview({
               )}
             </div>
             <div className="min-w-0">
-              <div className="truncate font-semibold text-white">{agentName || 'Agente IA'}</div>
+              <div className="truncate font-semibold text-white">{displayAgentName}</div>
               <div className="truncate text-xs text-emerald-300">
-                {businessName ? `${businessName} • online` : 'online para simulação'}
+                {`${displayBusinessName} • online`}
               </div>
             </div>
           </div>
@@ -1537,21 +1722,37 @@ function LeadInput({
   value,
   onChange,
   required,
+  type = 'text',
+  inputMode,
+  autoComplete,
+  placeholder,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  type?: string;
+  inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search';
+  autoComplete?: string;
+  placeholder?: string;
+  error?: string;
 }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+    <label className="input-group">
+      <span>{label}</span>
       <input
+        type={type}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="light-input h-12 w-full"
+        aria-invalid={Boolean(error)}
         required={required}
       />
+      {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
     </label>
   );
 }

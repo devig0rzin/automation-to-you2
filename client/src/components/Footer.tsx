@@ -1,50 +1,67 @@
-import { ArrowRight, Instagram, Mail, MessageCircle } from 'lucide-react';
+import { ArrowRight, Instagram, Mail } from 'lucide-react';
 import Logo from './Logo';
+import WhatsAppIcon from './WhatsAppIcon';
 
-const productLinks = ['Agentes de IA', 'Fluxos', 'Automações', 'Integrações'];
-const companyLinks = ['Sobre', 'Contato', 'Privacidade', 'Termos'];
+const productLinks = ['Agentes de IA', 'Fluxos de WhatsApp', 'Automações', 'Integrações'];
+const companyLinks = ['Sobre', 'Como funciona', 'Privacidade', 'Termos'];
+const contactLinks = ['WhatsApp', 'Instagram', 'E-mail'];
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="relative overflow-hidden border-t border-slate-200 bg-white">
-      <div className="absolute inset-0 bg-gradient-to-b from-sky-50/80 to-transparent" />
-      <div className="relative z-10 container mx-auto max-w-7xl px-4 py-14">
-        <div className="grid gap-10 md:grid-cols-[1.3fr_0.7fr_0.7fr_0.8fr]">
-          <div>
-            <div className="flex items-center gap-3">
-              <Logo className="h-16 w-auto" />
-              <div>
-                <div className="text-xs text-slate-500">AI automation studio</div>
+    <footer className="footer relative overflow-hidden border-t border-slate-200 bg-white">
+      <div className="footer-main relative z-10">
+        <div className="container mx-auto max-w-7xl px-4 py-14">
+          <div className="grid gap-10 md:grid-cols-[1.3fr_0.7fr_0.7fr_0.8fr]">
+            <div className="footer-brand">
+              <div className="flex items-center gap-3">
+                <Logo className="footer-logo h-16 w-auto" />
+                <div>
+                  <div className="text-xs text-slate-500">AI automation studio</div>
+                </div>
               </div>
+              <p className="footer-description mt-5 max-w-sm text-sm leading-7 text-slate-600">
+                Criamos automações, agentes de IA e fluxos conversacionais para empresas que querem vender, atender e captar leads com mais autoridade.
+              </p>
             </div>
-            <p className="mt-5 max-w-sm text-sm leading-7 text-slate-600">
-              Criamos experiências digitais com IA, automação e design para empresas que querem vender tecnologia com mais autoridade.
-            </p>
-          </div>
 
-          <FooterColumn title="Produto" links={productLinks} />
-          <FooterColumn title="Empresa" links={companyLinks} />
+            <div className="footer-columns contents">
+              <FooterColumn title="Produto" links={productLinks} />
+              <FooterColumn title="Empresa" links={companyLinks} />
 
-          <div>
-            <h4 className="mb-4 text-sm font-semibold text-slate-950">Contato</h4>
-            <div className="flex gap-3">
-              <SocialLink href="https://instagram.com/automationtoy" label="Instagram">
-                <Instagram className="h-5 w-5" />
-              </SocialLink>
-              <SocialLink href="https://wa.me/5511999999999" label="WhatsApp">
-                <MessageCircle className="h-5 w-5" />
-              </SocialLink>
-              <SocialLink href="mailto:contato@automationtoyou.com" label="Email">
-                <Mail className="h-5 w-5" />
-              </SocialLink>
+              <div className="footer-column">
+                <h4 className="mb-4 text-sm font-semibold text-slate-950">Contato</h4>
+                <ul className="mb-5 space-y-3">
+                  {contactLinks.map((link) => (
+                    <li key={link}>
+                      <a href="#" className="group inline-flex items-center gap-1 text-sm text-slate-600 transition hover:text-sky-700">
+                        {link}
+                        <ArrowRight className="h-3 w-3 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+                <div className="footer-socials flex gap-3">
+                  <SocialLink href="https://instagram.com/automationtoy" label="Instagram">
+                    <Instagram className="h-5 w-5" />
+                  </SocialLink>
+                  <SocialLink href="https://wa.me/5511987793213" label="WhatsApp">
+                    <WhatsAppIcon className="h-6 w-6" />
+                  </SocialLink>
+                  <SocialLink href="mailto:contato@automationtoyou.com" label="Email">
+                    <Mail className="h-5 w-5" />
+                  </SocialLink>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="mt-12 flex flex-col gap-4 border-t border-slate-200 pt-8 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
-          <p>&copy; {currentYear} Automation to You. Todos os direitos reservados.</p>
+      <div className="footer-bottom relative z-10">
+        <div className="container mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-sm md:flex-row md:items-center md:justify-between">
+          <p>&copy; {currentYear} ATY Automation Studio. Todos os direitos reservados.</p>
           <p>Design, IA e automação para experiências comerciais melhores.</p>
         </div>
       </div>
@@ -54,7 +71,7 @@ export default function Footer() {
 
 function FooterColumn({ title, links }: { title: string; links: string[] }) {
   return (
-    <div>
+    <div className="footer-column">
       <h4 className="mb-4 text-sm font-semibold text-slate-950">{title}</h4>
       <ul className="space-y-3">
         {links.map((link) => (

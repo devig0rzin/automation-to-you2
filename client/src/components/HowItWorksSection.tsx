@@ -26,8 +26,22 @@ const steps = [
 
 export default function HowItWorksSection() {
   return (
-    <section className="pastel-section border-y border-slate-200/80">
-      <div className="section-inner">
+    <section className="process-section process-section-video border-y border-sky-200/10">
+      <video
+        className="process-bg-video"
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        poster="/computador-transparent.png"
+        aria-hidden="true"
+      >
+        <source src="/fundomp4.mp4" type="video/mp4" />
+      </video>
+      <div className="process-bg-overlay" />
+
+      <div className="process-content section-inner">
         <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
           <motion.div
             className="lg:sticky lg:top-24"
@@ -36,31 +50,34 @@ export default function HowItWorksSection() {
             transition={{ duration: 0.5 }}
             viewport={{ once: true }}
           >
-            <div className="light-eyebrow mb-5">Processo</div>
-            <h2 className="text-balance text-4xl font-semibold text-slate-950 md:text-6xl">
-              Um caminho simples para transformar ideia em demonstração.
+            <div className="process-eyebrow light-eyebrow mb-5">Processo</div>
+            <h2 className="text-balance text-4xl font-semibold text-white md:text-6xl">
+              Da ideia à demonstração em poucos passos.
             </h2>
-            <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-              O objetivo é reduzir explicações longas. A pessoa testa, entende e visualiza o agente funcionando no contexto dela.
+            <p className="mt-5 max-w-xl text-lg leading-8 text-slate-300">
+              O cliente entende o valor da automação, visualiza o atendimento funcionando e segue para uma conversa comercial com mais confiança.
             </p>
+            <a href="#simulador-agente" className="process-cta mt-8">
+              Criar minha prévia gratuita
+            </a>
           </motion.div>
 
-          <div className="space-y-4">
+          <div className="process-steps-list space-y-4">
             {steps.map((step, index) => (
               <motion.article
                 key={step.number}
-                className="light-card p-6 md:p-7"
+                className="process-step-card light-card p-6 md:p-7"
                 initial={{ opacity: 0, x: 18 }}
                 whileInView={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.45, delay: index * 0.06 }}
                 viewport={{ once: true }}
               >
                 <div className="flex gap-5">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-100 bg-sky-50 text-sm font-semibold text-sky-700">
+                  <div className="process-step-number flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-100 bg-sky-50 text-sm font-semibold text-sky-700">
                     {step.number}
                   </div>
                   <div>
-                    <div className="mb-2 flex items-center gap-2 text-sm text-emerald-600">
+                    <div className="process-step-badge mb-2 flex items-center gap-2 text-sm text-emerald-600">
                       <CheckCircle2 className="h-4 w-4" />
                       Etapa validada
                     </div>
